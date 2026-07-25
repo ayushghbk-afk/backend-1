@@ -1,0 +1,85 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const Groq = require('groq-sdk');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(cors({
+    origin: ['https://ayushghbk-afk.github.io', 'http://localhost:3000'], // Allow your GitHub Pages domain
+    methods: ['POST'],
+    credentials: true
+}));
+app.use(express.json());
+
+// Initialize Groq client
+const groq = new Groq({
+    apiKey: process.env.GROQ_API_KEY,
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({ status: 'OK', message: 'Proxy server is running' });
+});
+
+// Main chat endpoint
+app.post('/api/chat', async (req, res) => {
+    try {
+        const { messages } = req.body;
+        
+        // Validate request
+        if (!messages || !Array.isArray(messages) || messages.length === 0) {
+            return res.status(400).json({ 
+                error: 'Messages array is required and must not be empty' 
+            });
+        }
+
+        // Filter out system messages if needed, or keep them for context
+        const cleanMessages = messages.filter(msg => msg.role !== 'system');
+
+        const completion = await groq.chat.completions.create({
+            model: "llama-3.3-70b-versatile", // You can change this
+            messages: cleanMessages,
+            temperature: 0.7,
+            max_tokens: 1024,
+            top_p: 1,
+            stream: false,
+        });
+
+        const reply = completion.choices[0]?.message?.content || "I couldn't generate a response. Please try again.";
+        
+        res.json({ 
+            success: true, 
+            reply: reply 
+        });
+
+    } catch (error) {
+        console.error('Groq API Error:', error);
+        
+        // Handle specific error types
+        if (error.status === 429) {
+            return res.status(429).json({ 
+                error: 'Rate limit exceeded. Please try again later.' 
+            });
+        }
+        
+        res.status(500).json({ 
+            error: 'Failed to get response from AI. Please try again.' 
+        });
+    }
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Server Error:', err);
+    res.status(500).json({ 
+        error: 'Internal server error' 
+    });
+});
+
+app.listen(PORT, () => {
+    console.log(`🚀 Proxy server running on http://localhost:${PORT}`);
+    console.log(`📡 Ready to accept requests from your GitHub Pages site`);
+});
